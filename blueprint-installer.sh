@@ -1,6 +1,6 @@
 #!/bin/bash
 #=========================================================
-#   ⭐ BLUEPRINT AUTO INSTALLER (Improved Edition)
+#   ⭐ BLUEPRINT AUTO INSTALLER (Optimized Edition)
 #      Compatible with Debian/Ubuntu + Pterodactyl
 #      Created by Hopingboyz — Fully Optimized
 #=========================================================
@@ -30,8 +30,16 @@ cat << "EOF"
 EOF
 echo -e "${RESET}"
 
-echo -e "${GREEN}AUTO BLUEPRINT INSTALLER — Improved Version${RESET}"
+echo -e "${GREEN}AUTO BLUEPRINT INSTALLER — Optimized Version${RESET}"
 echo
+
+#============ LOGGING ============#
+LOG_FILE="/var/log/blueprint-installer.log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >> "$LOG_FILE"
+}
 
 #============ LOADING ANIMATION ============#
 loading() {
@@ -47,95 +55,185 @@ loading() {
 #============ ERROR EXIT ============#
 fail() {
     echo -e "${RED}❌ ERROR: $1${RESET}"
+    log "ERROR: $1"
     exit 1
 }
 
 #============ CHECK COMMAND ============#
 require() {
-    command -v "$1" >/dev/null 2>&1 || fail "Missing required command: $1"
+    if ! command -v "$1" >/dev/null 2>&1; then
+        fail "Missing required command: $1"
+    fi
 }
 
-#============ REQUIRED COMMANDS ============#
-for cmd in curl wget unzip git tee sudo; do
-    require "$cmd"
-done
+#============ CHECK IF ALREADY INSTALLED ============#
+check_already_installed() {
+    if [[ -f "/var/www/pterodactyl/.blueprint-installed" ]]; then
+        echo -e "${YELLOW}⚠️  Blueprint appears to be already installed.${RESET}"
+        read -p "Do you want to reinstall? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}Installation cancelled.${RESET}"
+            exit 0
+        fi
+    fi
+}
 
-#============ APT UPDATE ============#
-loading "Updating system"
-sudo apt update -y || fail "System update failed"
-sudo apt upgrade -y || fail "System upgrade failed"
+#============ CHECK ROOT PRIVILEGES ============#
+check_privileges() {
+    if [[ $EUID -eq 0 ]]; then
+        echo -e "${YELLOW}⚠️  Warning: Running as root is not recommended.${RESET}"
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 0
+        fi
+    elif [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
+        fail "This script requires sudo privileges. Run with sudo or as root."
+    fi
+}
 
-#============ INSTALL REQUIRED PACKAGES ============#
-loading "Installing dependencies"
-sudo apt install -y curl wget unzip git zip ca-certificates gnupg || fail "Failed to install required packages"
+#============ INSTALL PACKAGE IF MISSING ============#
+install_if_missing() {
+    local pkg="$1"
+    if ! dpkg -l | grep -q "^ii  $pkg "; then
+        loading "Installing $pkg"
+        sudo apt install -y "$pkg" || fail "Failed to install $pkg"
+        log "Installed package: $pkg"
+    else
+        log "Package already installed: $pkg"
+    fi
+}
 
-#============ VERIFY PTERODACTYL DIR ============#
-if [[ ! -d "/var/www/pterodactyl" ]]; then
-    fail "/var/www/pterodactyl directory not found. Install Pterodactyl first!"
-fi
+#============ MAIN SCRIPT ============#
+main() {
+    log "Starting Blueprint installation"
+    
+    # Initial checks
+    check_privileges
+    check_already_installed
 
-cd /var/www/pterodactyl || fail "Unable to enter Pterodactyl directory"
+    #============ REQUIRED COMMANDS ============#
+    loading "Checking system requirements"
+    for cmd in curl wget unzip git; do
+        require "$cmd"
+    done
 
-#============ DOWNLOAD LATEST BLUEPRINT ============#
-loading "Fetching latest Blueprint release"
+    #============ SYSTEM UPDATE ============#
+    loading "Updating system packages"
+    sudo apt update -y || fail "System update failed"
+    sudo apt upgrade -y || fail "System upgrade failed"
 
-LATEST_URL=$(curl -s https://api.github.com/repos/BlueprintFramework/framework/releases/latest \
-    | grep '"browser_download_url"' \
-    | grep ".zip" \
-    | head -n 1 \
-    | cut -d '"' -f 4)
+    #============ INSTALL REQUIRED PACKAGES ============#
+    loading "Checking and installing dependencies"
+    for pkg in curl wget unzip git zip ca-certificates gnupg lsb-release; do
+        install_if_missing "$pkg"
+    done
 
-[[ -z "$LATEST_URL" ]] && fail "Failed to get latest release URL"
+    #============ VERIFY PTERODACTYL DIR ============#
+    if [[ ! -d "/var/www/pterodactyl" ]]; then
+        fail "/var/www/pterodactyl directory not found. Install Pterodactyl first!"
+    fi
 
-loading "Downloading Blueprint"
-wget -q "$LATEST_URL" -O blueprint.zip || fail "Download failed"
+    cd /var/www/pterodactyl || fail "Unable to enter Pterodactyl directory"
 
-loading "Extracting Blueprint"
-unzip -oq blueprint.zip || fail "Unzip failed"
-rm -f blueprint.zip
+    #============ DOWNLOAD LATEST BLUEPRINT ============#
+    loading "Fetching latest Blueprint release"
 
-#============ INSTALL NODE 20 + YARN (Official Way) ============#
-loading "Setting up NodeSource repo"
+    LATEST_URL=$(curl -s https://api.github.com/repos/BlueprintFramework/framework/releases/latest \
+        | grep '"browser_download_url"' \
+        | grep ".zip" \
+        | head -n 1 \
+        | cut -d '"' -f 4)
 
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-    | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    [[ -z "$LATEST_URL" ]] && fail "Failed to get latest release URL"
 
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" \
-    | sudo tee /etc/apt/sources.list.d/nodesource.list >/dev/null
+    loading "Downloading Blueprint"
+    wget -q "$LATEST_URL" -O blueprint.zip || fail "Download failed"
 
-loading "Installing Node.js 20"
-sudo apt update -y || fail "Node repo update failed"
-sudo apt install -y nodejs || fail "Node.js installation failed"
+    loading "Extracting Blueprint"
+    unzip -oq blueprint.zip || fail "Unzip failed"
+    rm -f blueprint.zip
 
-loading "Enabling Corepack & Yarn"
-sudo corepack enable || true
-sudo npm install -g yarn || fail "Failed to install Yarn"
+    #============ NODE.JS INSTALLATION ============#
+    if ! command -v node >/dev/null 2>&1 || ! node --version | grep -q "v20"; then
+        loading "Setting up Node.js 20"
 
-loading "Installing frontend dependencies"
-yarn install || fail "Yarn failed to install dependencies"
+        # Remove existing Node.js if wrong version
+        if command -v node >/dev/null 2>&1; then
+            loading "Removing existing Node.js version"
+            sudo apt remove -y --purge nodejs npm || true
+            sudo rm -rf /etc/apt/sources.list.d/nodesource.list
+        fi
 
-#============ BLUEPRINT CONFIG ============#
-loading "Creating .blueprintrc"
+        # Install Node.js 20 using NodeSource
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || fail "NodeSource setup failed"
+        sudo apt update -y
+        sudo apt install -y nodejs || fail "Node.js installation failed"
+        
+        log "Node.js installed/updated to version 20"
+    else
+        loading "Node.js 20 already installed"
+        log "Node.js 20 already present"
+    fi
 
-cat <<EOF | sudo tee /var/www/pterodactyl/.blueprintrc >/dev/null
-WEBUSER="www-data";
-OWNERSHIP="www-data:www-data";
-USERSHELL="/bin/bash";
+    #============ YARN SETUP ============#
+    if ! command -v yarn >/dev/null 2>&1; then
+        loading "Installing Yarn"
+        sudo npm install -g corepack || fail "Corepack installation failed"
+        sudo corepack enable || fail "Corepack enable failed"
+        log "Yarn installed via corepack"
+    else
+        loading "Yarn already installed"
+        log "Yarn already present"
+    fi
+
+    #============ FRONTEND DEPENDENCIES ============#
+    loading "Installing frontend dependencies"
+    yarn install --production=false || fail "Yarn failed to install dependencies"
+    log "Frontend dependencies installed"
+
+    #============ BLUEPRINT CONFIG ============#
+    if [[ ! -f "/var/www/pterodactyl/.blueprintrc" ]]; then
+        loading "Creating .blueprintrc"
+        cat <<EOF | sudo tee /var/www/pterodactyl/.blueprintrc >/dev/null
+WEBUSER="www-data"
+OWNERSHIP="www-data:www-data"
+USERSHELL="/bin/bash"
 EOF
+        log "Created .blueprintrc configuration"
+    else
+        loading ".blueprintrc already exists"
+        log ".blueprintrc configuration already present"
+    fi
 
-#============ RUN BLUEPRINT INSTALLER ============#
-[[ ! -f "/var/www/pterodactyl/blueprint.sh" ]] && fail "blueprint.sh missing! Extraction failed!"
+    #============ RUN BLUEPRINT INSTALLER ============#
+    if [[ ! -f "/var/www/pterodactyl/blueprint.sh" ]]; then
+        fail "blueprint.sh missing! Extraction failed!"
+    fi
 
-loading "Fixing permissions"
-sudo chmod +x /var/www/pterodactyl/blueprint.sh
+    loading "Fixing permissions"
+    sudo chmod +x /var/www/pterodactyl/blueprint.sh
 
-loading "Running Blueprint installer"
-sudo bash /var/www/pterodactyl/blueprint.sh || fail "Blueprint failed to run"
+    loading "Running Blueprint installer"
+    sudo bash /var/www/pterodactyl/blueprint.sh || fail "Blueprint failed to run"
 
-#============ COMPLETE ============#
-echo
-echo -e "${GREEN}✔ Blueprint installation completed successfully!${RESET}"
-echo -e "${CYAN}🎉 Your Pterodactyl Blueprint theme is now installed perfectly.${RESET}"
-echo -e "${YELLOW}Reload panel: ${RESET}sudo php artisan cache:clear"
-echo
+    #============ MARK AS INSTALLED ============#
+    sudo touch /var/www/pterodactyl/.blueprint-installed
+    log "Blueprint installation completed successfully"
+
+    #============ COMPLETE ============#
+    echo
+    echo -e "${GREEN}✔ Blueprint installation completed successfully!${RESET}"
+    echo -e "${CYAN}🎉 Your Pterodactyl Blueprint theme is now installed perfectly.${RESET}"
+    echo
+    echo -e "${YELLOW}Next steps:${RESET}"
+    echo -e "${YELLOW}1. Clear cache:${RESET} sudo php artisan cache:clear"
+    echo -e "${YELLOW}2. Restart queue:${RESET} sudo php artisan queue:restart"
+    echo -e "${YELLOW}3. View logs:${RESET} tail -f $LOG_FILE"
+    echo
+    echo -e "${GREEN}Installation log: $LOG_FILE${RESET}"
+}
+
+# Run main function
+main "$@"
