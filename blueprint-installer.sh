@@ -88,8 +88,8 @@ check_privileges() {
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             exit 0
         fi
-    elif [[ $EUID -ne 0 ]] && ! sudo -n true 2>/dev/null; then
-        fail "This script requires sudo privileges. Run with sudo or as root."
+    elif [[ $EUID -ne 0 ]] && ! -n true 2>/dev/null; then
+        fail "This script requires privileges. Run with or as root."
     fi
 }
 
@@ -98,7 +98,7 @@ install_if_missing() {
     local pkg="$1"
     if ! dpkg -l | grep -q "^ii  $pkg "; then
         loading "Installing $pkg"
-        sudo apt install -y "$pkg" || fail "Failed to install $pkg"
+        apt install -y "$pkg" || fail "Failed to install $pkg"
         log "Installed package: $pkg"
     else
         log "Package already installed: $pkg"
@@ -121,8 +121,8 @@ main() {
 
     #============ SYSTEM UPDATE ============#
     loading "Updating system packages"
-    sudo apt update -y || fail "System update failed"
-    sudo apt upgrade -y || fail "System upgrade failed"
+    apt update -y || fail "System update failed"
+    apt upgrade -y || fail "System upgrade failed"
 
     #============ INSTALL REQUIRED PACKAGES ============#
     loading "Checking and installing dependencies"
@@ -162,14 +162,14 @@ main() {
         # Remove existing Node.js if wrong version
         if command -v node >/dev/null 2>&1; then
             loading "Removing existing Node.js version"
-            sudo apt remove -y --purge nodejs npm || true
-            sudo rm -rf /etc/apt/sources.list.d/nodesource.list
+            apt remove -y --purge nodejs npm || true
+            rm -rf /etc/apt/sources.list.d/nodesource.list
         fi
 
         # Install Node.js 20 using NodeSource
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - || fail "NodeSource setup failed"
-        sudo apt update -y
-        sudo apt install -y nodejs || fail "Node.js installation failed"
+        curl -fsSL https://deb.nodesource.com/setup_20.x | -E bash - || fail "NodeSource setup failed"
+        apt update -y
+        apt install -y nodejs || fail "Node.js installation failed"
         
         log "Node.js installed/updated to version 20"
     else
@@ -180,8 +180,8 @@ main() {
     #============ YARN SETUP ============#
     if ! command -v yarn >/dev/null 2>&1; then
         loading "Installing Yarn"
-        sudo npm install -g corepack || fail "Corepack installation failed"
-        sudo corepack enable || fail "Corepack enable failed"
+        npm install -g corepack || fail "Corepack installation failed"
+        corepack enable || fail "Corepack enable failed"
         log "Yarn installed via corepack"
     else
         loading "Yarn already installed"
@@ -196,7 +196,7 @@ main() {
     #============ BLUEPRINT CONFIG ============#
     if [[ ! -f "/var/www/pterodactyl/.blueprintrc" ]]; then
         loading "Creating .blueprintrc"
-        cat <<EOF | sudo tee /var/www/pterodactyl/.blueprintrc >/dev/null
+        cat <<EOF | tee /var/www/pterodactyl/.blueprintrc >/dev/null
 WEBUSER="www-data"
 OWNERSHIP="www-data:www-data"
 USERSHELL="/bin/bash"
@@ -213,13 +213,13 @@ EOF
     fi
 
     loading "Fixing permissions"
-    sudo chmod +x /var/www/pterodactyl/blueprint.sh
+    chmod +x /var/www/pterodactyl/blueprint.sh
 
     loading "Running Blueprint installer"
-    sudo bash /var/www/pterodactyl/blueprint.sh || fail "Blueprint failed to run"
+    bash /var/www/pterodactyl/blueprint.sh || fail "Blueprint failed to run"
 
     #============ MARK AS INSTALLED ============#
-    sudo touch /var/www/pterodactyl/.blueprint-installed
+    touch /var/www/pterodactyl/.blueprint-installed
     log "Blueprint installation completed successfully"
 
     #============ COMPLETE ============#
@@ -228,8 +228,8 @@ EOF
     echo -e "${CYAN}🎉 Your Pterodactyl Blueprint theme is now installed perfectly.${RESET}"
     echo
     echo -e "${YELLOW}Next steps:${RESET}"
-    echo -e "${YELLOW}1. Clear cache:${RESET} sudo php artisan cache:clear"
-    echo -e "${YELLOW}2. Restart queue:${RESET} sudo php artisan queue:restart"
+    echo -e "${YELLOW}1. Clear cache:${RESET} php artisan cache:clear"
+    echo -e "${YELLOW}2. Restart queue:${RESET} php artisan queue:restart"
     echo -e "${YELLOW}3. View logs:${RESET} tail -f $LOG_FILE"
     echo
     echo -e "${GREEN}Installation log: $LOG_FILE${RESET}"
