@@ -167,7 +167,7 @@ main() {
         fi
 
         # Install Node.js 20 using NodeSource
-        curl -fsSL https://deb.nodesource.com/setup_20.x | -E bash - || fail "NodeSource setup failed"
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash - || fail "NodeSource setup failed"
         apt update -y
         apt install -y nodejs || fail "Node.js installation failed"
         
